@@ -36,6 +36,8 @@ class DaniMAgent(DefaultParty):
         super().__init__()
         self.logger: ReportToLogger = self.getReporter()
 
+        self.all_bids = []
+
         self.domain: Domain = None
         self.parameters: Parameters = None
         self.profile: LinearAdditiveUtilitySpace = None
@@ -45,9 +47,15 @@ class DaniMAgent(DefaultParty):
         self.settings: Settings = None
         self.storage_dir: str = None
 
+        self.batna = None
+        self.reservation_value = 0.8
+        self.alpha = 0.95
+        self.eps = 0.1
+        self.last_bid_checked = 0
+
         self.last_received_bid: Bid = None
         self.opponent_model: OpponentModel = None
-        self.opponent_utils = []
+        self.opponent_utilities = []
         self.opponent_type = "unknown"
         self.classification_done = False
 
@@ -82,6 +90,17 @@ class DaniMAgent(DefaultParty):
 
             self.domain = self.profile.getDomain()
             profile_connection.close()
+
+            # set best alternative to no agreement
+            batna_bid = self.profile.getReservationBid()
+            self.batna = self.profile.getUtility(batna_bid) if batna_bid else 0
+
+            # compose a list of all possible bids
+            all_bids_list = AllBidsList(self.domain)
+            self.all_bids = []
+            for i in range(all_bids_list.size()):
+                self.all_bids.append(all_bids_list.get(i))
+            self.all_bids.sort(key=lambda x: self.profile.getUtility(x), reverse=True)
 
         # ActionDone informs you of an action (an offer or an accept)
         # that is performed by one of the agents (including yourself).
@@ -119,8 +138,8 @@ class DaniMAgent(DefaultParty):
             Capabilities: Capabilities representation class
         """
         return Capabilities(
-            set(["SAOP"]),
-            set(["geniusweb.profile.utilityspace.LinearAdditive"]),
+            {"SAOP"},
+            {"geniusweb.profile.utilityspace.LinearAdditive"},
         )
 
     def send_action(self, action: Action):
@@ -144,16 +163,16 @@ class DaniMAgent(DefaultParty):
     def adjust_strategy_by_opponent_type(self):
         if self.opponent_type == "conceder":
             self.alpha = 0.98  # we want to be more selfish if the opponent is a conceder
-            self.min = 0.75
-            self.e = 0.02
+            self.reservation_value = 0.75
+            self.eps = 0.02
         elif self.opponent_type == "hardliner":
             self.alpha = 0.85  # we have to concede more if the opponent is a hardliner
-            self.min = 0.6
-            self.e = 0.08
+            self.reservation_value = 0.6
+            self.eps = 0.08
         elif self.opponent_type == "random":
             self.alpha = 0.9
-            self.min = 0.65
-            self.e = 0.05
+            self.reservation_value = 0.65
+            self.eps = 0.05
 
     def opponent_action(self, action):
         """Process an action that was received from the opponent.
@@ -163,8 +182,8 @@ class DaniMAgent(DefaultParty):
         """
         # if it is an offer, set the last received bid
         if isinstance(action, Offer):
-            # if self.opponent_model is None:
-            #     self.opponent_model = OpponentModel(self.domain)
+            if self.opponent_model is None:
+                self.opponent_model = OpponentModel(self.domain)
 
             bid = cast(Offer, action).getBid()
 
@@ -173,11 +192,11 @@ class DaniMAgent(DefaultParty):
             # set bid as last received
             self.last_received_bid = bid
             if self.profile and bid:
-                self.opponent_utils.append(self.profile.getUtility(bid))
+                self.opponent_utilities.append(self.profile.getUtility(bid))
 
             # Classification after N observations
-            if not self.classification_done and len(self.opponent_utils) >= 6:
-                diff = self.opponent_utils[-1] - self.opponent_utils[0]
+            if not self.classification_done and len(self.opponent_utilities) >= 6:
+                diff = self.opponent_utilities[-1] - self.opponent_utilities[0]
                 if diff > 0.15:
                     self.opponent_type = "conceder"
                 elif diff < 0.05:
@@ -221,47 +240,53 @@ class DaniMAgent(DefaultParty):
             return False
 
         # progress of the negotiation session between 0 and 1 (1 is deadline)
-        progress = self.progress.get(time() * 1000)
+        progress = self.progress.get(int(time() * 1000))
 
         # very basic approach that accepts if the offer is valued above 0.7 and
         # 95% of the time towards the deadline has passed
         conditions = [
-            self.profile.getUtility(bid) > 0.8,
-            progress > 0.95,
+            self.profile.getUtility(bid) > self.reservation_value,
+            progress >= 0.98 and self.profile.getUtility(bid) > self.batna,
         ]
-        return all(conditions)
+
+        return any(conditions)
 
     def find_bid(self) -> Bid:
-        # compose a list of all possible bids
-        domain = self.profile.getDomain()
-        all_bids = AllBidsList(domain)
+        if self.progress.get(int(time() * 1000)) >= 0.99:
+            return self.profile.getReservationBid()
 
         best_bid_score = 0.0
         best_bid = None
 
-        # take 500 attempts to find a bid according to a heuristic score
-        for _ in range(500):
-            bid = all_bids.get(randint(0, all_bids.size() - 1))
-            bid_score = self.score_bid(bid)
+        previous_start_index = self.last_bid_checked
+        best_bid_index = 0
+        if self.last_bid_checked >  len(self.all_bids):
+            self.last_bid_checked = max(0, len(self.all_bids) - 20)
+        for i in range(self.last_bid_checked, min(self.last_bid_checked + int(self.eps * 500), len(self.all_bids))):
+            bid = self.all_bids[i]
+            bid_score = self.score_bid(bid, self.alpha, self.eps)
             if bid_score > best_bid_score:
-                best_bid_score, best_bid = bid_score, bid
+                best_bid_score, best_bid, best_bid_index = bid_score, bid, i
 
+        div_factor = max(((1 - self.progress.get(int(time() * 1000))) * 200), 2)
+        self.last_bid_checked = previous_start_index + int((best_bid_index - previous_start_index) / div_factor)
+        print(int(self.eps * 100), best_bid_score, best_bid, self.opponent_model.get_predicted_utility(best_bid))
         return best_bid
 
-    def score_bid(self, bid: Bid, alpha: float = 0.95, eps: float = 0.1) -> float:
+    def score_bid(self, bid: Bid, alpha, eps) -> float:
         """Calculate heuristic score for a bid
 
         Args:
             bid (Bid): Bid to score
             alpha (float, optional): Trade-off factor between self-interested and
-                altruistic behaviour. Defaults to 0.95.
+                altruistic behaviour.
             eps (float, optional): Time pressure factor, balances between conceding
-                and Boulware behaviour over time. Defaults to 0.1.
+                and Boulware behaviour over time.
 
         Returns:
             float: score
         """
-        progress = self.progress.get(time() * 1000)
+        progress = self.progress.get(int(time() * 1000))
 
         our_utility = float(self.profile.getUtility(bid))
 
