@@ -47,6 +47,10 @@ class DaniMAgent(DefaultParty):
 
         self.last_received_bid: Bid = None
         self.opponent_model: OpponentModel = None
+        self.opponent_utils = []
+        self.opponent_type = "unknown"
+        self.classification_done = False
+
         self.logger.log(logging.INFO, "party is initialized")
 
     def notifyChange(self, data: Inform):
@@ -137,6 +141,20 @@ class DaniMAgent(DefaultParty):
         """
         return "Template agent for the ANL 2022 competition"
 
+    def adjust_strategy_by_opponent_type(self):
+        if self.opponent_type == "conceder":
+            self.alpha = 0.98  # we want to be more selfish if the opponent is a conceder
+            self.min = 0.75
+            self.e = 0.02
+        elif self.opponent_type == "hardliner":
+            self.alpha = 0.85  # we have to concede more if the opponent is a hardliner
+            self.min = 0.6
+            self.e = 0.08
+        elif self.opponent_type == "random":
+            self.alpha = 0.9
+            self.min = 0.65
+            self.e = 0.05
+
     def opponent_action(self, action):
         """Process an action that was received from the opponent.
 
@@ -145,16 +163,22 @@ class DaniMAgent(DefaultParty):
         """
         # if it is an offer, set the last received bid
         if isinstance(action, Offer):
-            # create opponent model if it was not yet initialised
-            if self.opponent_model is None:
-                self.opponent_model = OpponentModel(self.domain)
-
             bid = cast(Offer, action).getBid()
-
-            # update opponent model with bid
-            self.opponent_model.update(bid)
-            # set bid as last received
             self.last_received_bid = bid
+            if self.profile and bid:
+                self.opponent_utils.append(self.profile.getUtility(bid))
+
+            # Classification after N observations
+            if not self.classification_done and len(self.opponent_utils) >= 6:
+                diff = self.opponent_utils[-1] - self.opponent_utils[0]
+                if diff > 0.15:
+                    self.opponent_type = "conceder"
+                elif diff < 0.05:
+                    self.opponent_type = "hardliner"
+                else:
+                    self.opponent_type = "random"
+                self.classification_done = True
+                self.adjust_strategy_by_opponent_type()
 
     def my_turn(self):
         """This method is called when it is our turn. It should decide upon an action

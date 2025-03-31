@@ -8,3 +8,6 @@ results
 
 *.sbatch
 *.log
+
+agents/ANL2022/
+.idea/
