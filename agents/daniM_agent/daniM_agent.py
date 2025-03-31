@@ -163,7 +163,14 @@ class DaniMAgent(DefaultParty):
         """
         # if it is an offer, set the last received bid
         if isinstance(action, Offer):
+            # if self.opponent_model is None:
+            #     self.opponent_model = OpponentModel(self.domain)
+
             bid = cast(Offer, action).getBid()
+
+            # update opponent model with bid
+            self.opponent_model.update(bid)
+            # set bid as last received
             self.last_received_bid = bid
             if self.profile and bid:
                 self.opponent_utils.append(self.profile.getUtility(bid))
