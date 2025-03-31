@@ -1,4 +1,6 @@
 import logging
+
+from collections import defaultdict
 from random import randint
 from time import time
 from typing import cast
@@ -27,7 +29,10 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
-from .utils.opponent_model import OpponentModel
+from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
+from agents.daniM_agent.utils.opponent_model import OpponentModel
+from agents.daniM_agent.enums import Fairness, Stance, NegotiationType
+from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
 
 
 class DaniMAgent(DefaultParty):
@@ -36,7 +41,10 @@ class DaniMAgent(DefaultParty):
         super().__init__()
         self.logger: ReportToLogger = self.getReporter()
 
-        self.all_bids = []
+        self.all_bids: list[Bid] = []
+        self.bids_times: dict[Bid, int] = defaultdict(int)
+        self.last_received_bid: Bid = None
+        self.last_bid_checked: float = 0
 
         self.domain: Domain = None
         self.parameters: Parameters = None
@@ -47,17 +55,19 @@ class DaniMAgent(DefaultParty):
         self.settings: Settings = None
         self.storage_dir: str = None
 
-        self.batna = None
-        self.reservation_value = 0.8
-        self.alpha = 0.95
-        self.eps = 0.1
-        self.last_bid_checked = 0
+        self.batna: Optional[float] = None
+        self.reservation_value: float = 0.8
+        self.alpha: float = 0.95
+        self.eps: float = 0.1
 
-        self.last_received_bid: Bid = None
         self.opponent_model: OpponentModel = None
-        self.opponent_utilities = []
-        self.opponent_type = "unknown"
+        self.opponent_utilities: list[float] = []
+        self.opponent_negotiation_type: NegotiationType = NegotiationType.UNKNOWN
+        self.opponent_fairness: Fairness = Fairness.FAIR
+        self.opponent_stance: Stance = Stance.NEUTRAL
         self.classification_done = False
+
+        self.negotiation_strategy: NegotiationStrategy = None
 
         self.logger.log(logging.INFO, "party is initialized")
 
@@ -93,7 +103,7 @@ class DaniMAgent(DefaultParty):
 
             # set best alternative to no agreement
             batna_bid = self.profile.getReservationBid()
-            self.batna = self.profile.getUtility(batna_bid) if batna_bid else 0
+            self.batna = self.profile.getUtility(batna_bid) if batna_bid is not None else 0
 
             # compose a list of all possible bids
             all_bids_list = AllBidsList(self.domain)
@@ -158,21 +168,41 @@ class DaniMAgent(DefaultParty):
         Returns:
             str: Agent description
         """
-        return "Template agent for the ANL 2022 competition"
+        return "Template agent for the ANL 2025 competition"
 
     def adjust_strategy_by_opponent_type(self):
-        if self.opponent_type == "conceder":
-            self.alpha = 0.98  # we want to be more selfish if the opponent is a conceder
+        if self.opponent_negotiation_type == NegotiationType.CONCEDER:
+            self.alpha = 0.95  # we want to be more selfish if the opponent is a conceder
             self.reservation_value = 0.75
             self.eps = 0.02
-        elif self.opponent_type == "hardliner":
-            self.alpha = 0.85  # we have to concede more if the opponent is a hardliner
+        elif self.opponent_negotiation_type == NegotiationType.HARDLINER:
+            self.alpha = 0.80  # we have to concede more if the opponent is a hardliner
             self.reservation_value = 0.6
             self.eps = 0.08
-        elif self.opponent_type == "random":
-            self.alpha = 0.9
+        elif self.opponent_negotiation_type == NegotiationType.RANDOM:
+            self.alpha = 0.87
             self.reservation_value = 0.65
             self.eps = 0.05
+
+    def adjust_opponent_fairness(self, bid: Bid):
+        our_utility: float = float(self.profile.getUtility(bid))
+        opponent_utility: float = float(self.opponent_model.get_predicted_utility(bid))
+        is_fair = abs(our_utility - opponent_utility) <= 0.4 or opponent_utility <= 0.5
+        self.opponent_fairness = Fairness.FAIR if is_fair else Fairness.UNFAIR
+
+    def adjust_opponent_stance(self):
+        if len(self.opponent_model.offers) < 2:
+            return
+
+        last_bid_utility = self.opponent_model.get_predicted_utility(self.opponent_model.offers[-1])
+        before_last_bid_utility = self.opponent_model.get_predicted_utility(self.opponent_model.offers[-2])
+        delta_utility = last_bid_utility - before_last_bid_utility
+        if delta_utility > 0:
+            self.opponent_stance = Stance.GENEROUS
+        elif delta_utility == 0:
+            self.opponent_stance = Stance.NEUTRAL
+        else:
+            self.opponent_stance = Stance.GREEDY
 
     def opponent_action(self, action):
         """Process an action that was received from the opponent.
@@ -198,13 +228,15 @@ class DaniMAgent(DefaultParty):
             if not self.classification_done and len(self.opponent_utilities) >= 6:
                 diff = self.opponent_utilities[-1] - self.opponent_utilities[0]
                 if diff > 0.15:
-                    self.opponent_type = "conceder"
+                    self.opponent_negotiation_type = NegotiationType.CONCEDER
                 elif diff < 0.05:
-                    self.opponent_type = "hardliner"
+                    self.opponent_negotiation_type = NegotiationType.HARDLINER
                 else:
-                    self.opponent_type = "random"
+                    self.opponent_negotiation_type = NegotiationType.RANDOM
                 self.classification_done = True
                 self.adjust_strategy_by_opponent_type()
+            self.adjust_opponent_fairness(bid)
+            self.adjust_opponent_stance()
 
     def my_turn(self):
         """This method is called when it is our turn. It should decide upon an action
@@ -252,8 +284,6 @@ class DaniMAgent(DefaultParty):
         return any(conditions)
 
     def find_bid(self) -> Bid:
-        if self.progress.get(int(time() * 1000)) >= 0.99:
-            return self.profile.getReservationBid()
 
         best_bid_score = 0.0
         best_bid = None
@@ -270,7 +300,6 @@ class DaniMAgent(DefaultParty):
 
         div_factor = max(((1 - self.progress.get(int(time() * 1000))) * 200), 2)
         self.last_bid_checked = previous_start_index + int((best_bid_index - previous_start_index) / div_factor)
-        print(int(self.eps * 100), best_bid_score, best_bid, self.opponent_model.get_predicted_utility(best_bid))
         return best_bid
 
     def score_bid(self, bid: Bid, alpha, eps) -> float:
