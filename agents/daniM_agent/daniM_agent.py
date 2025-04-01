@@ -29,15 +29,15 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
-from agents.daniM_agent.negotiation_strategies.continued_smaller_concessions_strategy import \
-    ContinuedSmallerConcessionsStrategy
+from agents.daniM_agent.negotiation_strategies.continued_concessions_strategy import \
+    ContinuedConcessionsStrategy
 from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
 from agents.daniM_agent.negotiation_strategies.negotiation_strategy_factory import NegotiationStrategyFactory
 from agents.daniM_agent.utils.opponent_model import OpponentModel
 from agents.daniM_agent.enums import Fairness, Stance, NegotiationType
 from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
 
-from agents.daniM_agent.negotiation_strategies.continued_smaller_concessions_strategy import ContinuedSmallerConcessionsStrategy
+from agents.daniM_agent.negotiation_strategies.continued_concessions_strategy import ContinuedConcessionsStrategy
 
 class DaniMAgent(DefaultParty):
 
@@ -72,7 +72,7 @@ class DaniMAgent(DefaultParty):
         self.opponent_stance: Stance = Stance.NEUTRAL
         self.classification_done = False
 
-        self.negotiation_strategy: NegotiationStrategy = ContinuedSmallerConcessionsStrategy()
+        self.negotiation_strategy: NegotiationStrategy = ContinuedConcessionsStrategy()
 
         self.logger.log(logging.INFO, "party is initialized")
 
@@ -284,7 +284,7 @@ class DaniMAgent(DefaultParty):
         # 95% of the time towards the deadline has passed
         conditions = [
             self.profile.getUtility(bid) > self.reservation_value,
-            progress >= 0.98 and self.profile.getUtility(bid) > self.batna,
+            progress >= 0.99 and self.profile.getUtility(bid) > self.batna,
         ]
 
         return any(conditions)
@@ -300,8 +300,7 @@ class DaniMAgent(DefaultParty):
             self.last_bid_checked = max(0, len(self.all_bids) - 20)
         for i in range(2000):
             bid = self.all_bids[i]
-            # bid_score = self.negotiation_strategy.score_bid(bid, self)
-            bid_score = self.score_bid(bid, self.alpha, self.eps)
+            bid_score = self.negotiation_strategy.score_bid(bid, self)
             own_utility = self.profile.getUtility(bid)
             if bid_score > best_bid_score and own_utility > self.reservation_value:
                 best_bid_score, best_bid, best_bid_index = bid_score, bid, i

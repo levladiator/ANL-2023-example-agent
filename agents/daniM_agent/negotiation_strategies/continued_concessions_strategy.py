@@ -3,7 +3,7 @@ from time import time
 from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
 from geniusweb.issuevalue.Bid import Bid
 
-class ContinuedSmallerConcessionsStrategy(NegotiationStrategy):
+class ContinuedConcessionsStrategy(NegotiationStrategy):
     def __init__(self):
         self.target_utility_delta = 0.01
 
