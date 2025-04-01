@@ -29,11 +29,15 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
+from agents.daniM_agent.negotiation_strategies.continued_smaller_concessions_strategy import \
+    ContinuedSmallerConcessionsStrategy
 from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
+from agents.daniM_agent.negotiation_strategies.negotiation_strategy_factory import NegotiationStrategyFactory
 from agents.daniM_agent.utils.opponent_model import OpponentModel
 from agents.daniM_agent.enums import Fairness, Stance, NegotiationType
 from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
 
+from agents.daniM_agent.negotiation_strategies.continued_smaller_concessions_strategy import ContinuedSmallerConcessionsStrategy
 
 class DaniMAgent(DefaultParty):
 
@@ -45,6 +49,7 @@ class DaniMAgent(DefaultParty):
         self.bids_times: dict[Bid, int] = defaultdict(int)
         self.last_received_bid: Bid = None
         self.last_bid_checked: float = 0
+        self.own_bids: list[Bid] = []
 
         self.domain: Domain = None
         self.parameters: Parameters = None
@@ -67,7 +72,7 @@ class DaniMAgent(DefaultParty):
         self.opponent_stance: Stance = Stance.NEUTRAL
         self.classification_done = False
 
-        self.negotiation_strategy: NegotiationStrategy = None
+        self.negotiation_strategy: NegotiationStrategy = ContinuedSmallerConcessionsStrategy()
 
         self.logger.log(logging.INFO, "party is initialized")
 
@@ -237,6 +242,7 @@ class DaniMAgent(DefaultParty):
                 self.adjust_strategy_by_opponent_type()
             self.adjust_opponent_fairness(bid)
             self.adjust_opponent_stance()
+            # self.negotiation_strategy = NegotiationStrategyFactory.select_strategy(self.opponent_negotiation_type, self.opponent_stance, self.opponent_fairness)
 
     def my_turn(self):
         """This method is called when it is our turn. It should decide upon an action
@@ -285,21 +291,24 @@ class DaniMAgent(DefaultParty):
 
     def find_bid(self) -> Bid:
 
-        best_bid_score = 0.0
+        best_bid_score = -1.0
         best_bid = None
 
         previous_start_index = self.last_bid_checked
         best_bid_index = 0
         if self.last_bid_checked >  len(self.all_bids):
             self.last_bid_checked = max(0, len(self.all_bids) - 20)
-        for i in range(self.last_bid_checked, min(self.last_bid_checked + int(self.eps * 500), len(self.all_bids))):
+        for i in range(2000):
             bid = self.all_bids[i]
+            # bid_score = self.negotiation_strategy.score_bid(bid, self)
             bid_score = self.score_bid(bid, self.alpha, self.eps)
-            if bid_score > best_bid_score:
+            own_utility = self.profile.getUtility(bid)
+            if bid_score > best_bid_score and own_utility > self.reservation_value:
                 best_bid_score, best_bid, best_bid_index = bid_score, bid, i
 
-        div_factor = max(((1 - self.progress.get(int(time() * 1000))) * 200), 2)
-        self.last_bid_checked = previous_start_index + int((best_bid_index - previous_start_index) / div_factor)
+        self.own_bids.append(best_bid)
+        # div_factor = max(((1 - self.progress.get(int(time() * 1000))) * 200), 2)
+        # self.last_bid_checked = previous_start_index + int((best_bid_index - previous_start_index) / div_factor)
         return best_bid
 
     def score_bid(self, bid: Bid, alpha, eps) -> float:

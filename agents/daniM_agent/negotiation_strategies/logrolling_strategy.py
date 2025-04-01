@@ -3,3 +3,4 @@ from agents.daniM_agent.negotiation_strategies.negotiation_strategy import Negot
 
 class LogrollingStrategy(NegotiationStrategy):
     def __init__(self):
+        self.a = 1
