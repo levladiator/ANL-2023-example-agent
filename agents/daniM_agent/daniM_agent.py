@@ -298,4 +298,7 @@ class DaniMAgent(DefaultParty):
             opponent_score = (1.0 - alpha * time_pressure) * opponent_utility
             score += opponent_score
 
+        if self.opponent_model.get_predicted_utility(bid) > 0.8: # TODO: tunning
+            score += 0.02
+        
         return score

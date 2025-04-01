@@ -15,6 +15,10 @@ class OpponentModel:
             i: IssueEstimator(v) for i, v in domain.getIssuesValues().items()
         }
 
+    def model(self, bid: Bid) -> int:
+        pred = self.get_predicted_utility(bid)
+        return 1 if pred > 0.8 else -1  # TODO: tuning 
+
     def update(self, bid: Bid):
         # keep track of all bids received
         self.offers.append(bid)
