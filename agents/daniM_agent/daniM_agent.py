@@ -242,6 +242,11 @@ class DaniMAgent(DefaultParty):
                 self.adjust_strategy_by_opponent_type()
             self.adjust_opponent_fairness(bid)
             self.adjust_opponent_stance()
+
+            if len(self.opponent_utilities) >= 20:
+                self.last_bid_sent_index = 0
+                self.all_bids.sort(key=lambda x: float(self.profile.getUtility(x)) + self.opponent_model.get_predicted_utility(x), reverse=True)
+
             # self.negotiation_strategy = NegotiationStrategyFactory.select_strategy(self.opponent_negotiation_type, self.opponent_stance, self.opponent_fairness)
 
     def my_turn(self):
@@ -290,14 +295,13 @@ class DaniMAgent(DefaultParty):
         return any(conditions)
 
     def find_bid(self) -> Bid:
-
         best_bid_score = -1.0
         best_bid = None
         best_bid_index = 0
 
         windows_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
 
-        right_boundary: int = min(int(self.last_bid_sent_index + windows_size), len(self.opponent_utilities))
+        right_boundary: int = min(int(self.last_bid_sent_index + windows_size), len(self.all_bids))
 
         for i in range(self.last_bid_sent_index, right_boundary):
             bid = self.all_bids[i]
@@ -308,7 +312,6 @@ class DaniMAgent(DefaultParty):
 
         self.last_bid_sent_index = best_bid_index
         self.own_bids.append(best_bid)
-        print(best_bid_index)
         return best_bid
 
     def score_bid(self, bid: Bid, alpha, eps) -> float:
