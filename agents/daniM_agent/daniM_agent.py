@@ -48,7 +48,7 @@ class DaniMAgent(DefaultParty):
         self.all_bids: list[Bid] = []
         self.bids_times: dict[Bid, int] = defaultdict(int)
         self.last_received_bid: Bid = None
-        self.last_bid_checked: float = 0
+        self.last_bid_sent_index: float = 0
         self.own_bids: list[Bid] = []
 
         self.domain: Domain = None
@@ -293,21 +293,22 @@ class DaniMAgent(DefaultParty):
 
         best_bid_score = -1.0
         best_bid = None
-
-        previous_start_index = self.last_bid_checked
         best_bid_index = 0
-        if self.last_bid_checked >  len(self.all_bids):
-            self.last_bid_checked = max(0, len(self.all_bids) - 20)
-        for i in range(2000):
+
+        windows_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
+
+        right_boundary: int = min(int(self.last_bid_sent_index + windows_size), len(self.opponent_utilities))
+
+        for i in range(self.last_bid_sent_index, right_boundary):
             bid = self.all_bids[i]
             bid_score = self.negotiation_strategy.score_bid(bid, self)
             own_utility = self.profile.getUtility(bid)
             if bid_score > best_bid_score and own_utility > self.reservation_value:
                 best_bid_score, best_bid, best_bid_index = bid_score, bid, i
 
+        self.last_bid_sent_index = best_bid_index
         self.own_bids.append(best_bid)
-        # div_factor = max(((1 - self.progress.get(int(time() * 1000))) * 200), 2)
-        # self.last_bid_checked = previous_start_index + int((best_bid_index - previous_start_index) / div_factor)
+        print(best_bid_index)
         return best_bid
 
     def score_bid(self, bid: Bid, alpha, eps) -> float:
