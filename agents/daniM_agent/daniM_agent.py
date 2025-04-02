@@ -1,10 +1,10 @@
 import logging
 
 from collections import defaultdict
-from random import randint
 from time import time
-from typing import cast
+from typing import cast, Optional
 
+import numpy as np
 from geniusweb.actions.Accept import Accept
 from geniusweb.actions.Action import Action
 from geniusweb.actions.Offer import Offer
@@ -29,15 +29,15 @@ from geniusweb.progress.ProgressTime import ProgressTime
 from geniusweb.references.Parameters import Parameters
 from tudelft_utilities_logging.ReportToLogger import ReportToLogger
 
-from agents.daniM_agent.negotiation_strategies.continued_concessions_strategy import \
-    ContinuedConcessionsStrategy
-from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
-from agents.daniM_agent.negotiation_strategies.negotiation_strategy_factory import NegotiationStrategyFactory
 from agents.daniM_agent.utils.opponent_model import OpponentModel
 from agents.daniM_agent.enums import Fairness, Stance, NegotiationType
-from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
 
-from agents.daniM_agent.negotiation_strategies.continued_concessions_strategy import ContinuedConcessionsStrategy
+from agents.daniM_agent.negotiation_strategies.negotiation_strategy_factory import NegotiationStrategyFactory
+
+from agents.daniM_agent.negotiation_strategies.negotiation_strategy import NegotiationStrategy
+from agents.daniM_agent.negotiation_strategies.aggressive_early_offers_strategy import AggressiveEarlyOffersStrategy
+
+EXPLORATION_TIME_LIMIT = 0.1
 
 class DaniMAgent(DefaultParty):
 
@@ -48,7 +48,7 @@ class DaniMAgent(DefaultParty):
         self.all_bids: list[Bid] = []
         self.bids_times: dict[Bid, int] = defaultdict(int)
         self.last_received_bid: Bid = None
-        self.last_bid_sent_index: float = 0
+        self.last_bid_sent_index: int = 0
         self.own_bids: list[Bid] = []
 
         self.domain: Domain = None
@@ -72,7 +72,7 @@ class DaniMAgent(DefaultParty):
         self.opponent_stance: Stance = Stance.NEUTRAL
         self.classification_done = False
 
-        self.negotiation_strategy: NegotiationStrategy = ContinuedConcessionsStrategy()
+        self.negotiation_strategy: NegotiationStrategy = AggressiveEarlyOffersStrategy()
 
         self.logger.log(logging.INFO, "party is initialized")
 
@@ -229,25 +229,31 @@ class DaniMAgent(DefaultParty):
             if self.profile and bid:
                 self.opponent_utilities.append(self.profile.getUtility(bid))
 
+            progress = self.progress.get(int(time() * 1000))
+
             # Classification after N observations
-            if not self.classification_done and len(self.opponent_utilities) >= 6:
-                diff = self.opponent_utilities[-1] - self.opponent_utilities[0]
-                if diff > 0.15:
-                    self.opponent_negotiation_type = NegotiationType.CONCEDER
-                elif diff < 0.05:
-                    self.opponent_negotiation_type = NegotiationType.HARDLINER
-                else:
+            if (not self.classification_done) and (progress >= EXPLORATION_TIME_LIMIT):
+                diffs = np.diff(self.opponent_utilities)
+                positive_diffs = np.sum(diffs > 0)
+                negative_diffs = np.sum(diffs < 0)
+                if positive_diffs > int(0.4 * len(self.opponent_utilities)) and negative_diffs > int(0.4 * len(self.opponent_utilities)):
                     self.opponent_negotiation_type = NegotiationType.RANDOM
+                else:
+                    diff = self.opponent_utilities[-1] - self.opponent_utilities[0]
+                    if diff > 0.15:
+                        self.opponent_negotiation_type = NegotiationType.CONCEDER
+                    else:
+                        self.opponent_negotiation_type = NegotiationType.HARDLINER
                 self.classification_done = True
                 self.adjust_strategy_by_opponent_type()
-            self.adjust_opponent_fairness(bid)
-            self.adjust_opponent_stance()
 
-            if len(self.opponent_utilities) >= 20:
                 self.last_bid_sent_index = 0
                 self.all_bids.sort(key=lambda x: float(self.profile.getUtility(x)) + self.opponent_model.get_predicted_utility(x), reverse=True)
 
-            # self.negotiation_strategy = NegotiationStrategyFactory.select_strategy(self.opponent_negotiation_type, self.opponent_stance, self.opponent_fairness)
+            self.adjust_opponent_fairness(bid)
+            self.adjust_opponent_stance()
+            if progress >= EXPLORATION_TIME_LIMIT:
+                self.negotiation_strategy = NegotiationStrategyFactory.select_strategy(self.opponent_negotiation_type, self.opponent_stance, self.opponent_fairness)
 
     def my_turn(self):
         """This method is called when it is our turn. It should decide upon an action
@@ -299,9 +305,9 @@ class DaniMAgent(DefaultParty):
         best_bid = None
         best_bid_index = 0
 
-        windows_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
+        window_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
 
-        right_boundary: int = min(int(self.last_bid_sent_index + windows_size), len(self.all_bids))
+        right_boundary: int = min(int(self.last_bid_sent_index + window_size), len(self.all_bids))
 
         for i in range(self.last_bid_sent_index, right_boundary):
             bid = self.all_bids[i]
@@ -310,36 +316,10 @@ class DaniMAgent(DefaultParty):
             if bid_score > best_bid_score and own_utility > self.reservation_value:
                 best_bid_score, best_bid, best_bid_index = bid_score, bid, i
 
+        if best_bid is None:
+            return self.find_bid()
+
         self.last_bid_sent_index = best_bid_index
         self.own_bids.append(best_bid)
+
         return best_bid
-
-    def score_bid(self, bid: Bid, alpha, eps) -> float:
-        """Calculate heuristic score for a bid
-
-        Args:
-            bid (Bid): Bid to score
-            alpha (float, optional): Trade-off factor between self-interested and
-                altruistic behaviour.
-            eps (float, optional): Time pressure factor, balances between conceding
-                and Boulware behaviour over time.
-
-        Returns:
-            float: score
-        """
-        progress = self.progress.get(int(time() * 1000))
-
-        our_utility = float(self.profile.getUtility(bid))
-
-        time_pressure = 1.0 - progress ** (1 / eps)
-        score = alpha * time_pressure * our_utility
-
-        if self.opponent_model is not None:
-            opponent_utility = self.opponent_model.get_predicted_utility(bid)
-            opponent_score = (1.0 - alpha * time_pressure) * opponent_utility
-            score += opponent_score
-
-        if self.opponent_model.get_predicted_utility(bid) > 0.8: # TODO: tunning
-            score += 0.02
-        
-        return score
