@@ -11,7 +11,7 @@ class NegotiationStrategyFactory:
         if opponent_negotiation_model == NegotiationType.CONCEDER:
             if opponent_stance == Stance.GREEDY or opponent_fairness == Fairness.UNFAIR:
                 return LogrollingStrategy()
-            elif opponent_stance == Stance.NEUTRAL or opponent_stance == Stance.GENEROUS:
+            else:                                         # opponent_stance == Stance.NEUTRAL or opponent_stance == Stance.GENEROUS:
                 return ContinuedConcessionsStrategy()
 
         elif opponent_negotiation_model == NegotiationType.HARDLINER:
@@ -19,17 +19,16 @@ class NegotiationStrategyFactory:
                 return RespondToExtremeOfferStrategy()
             elif opponent_stance == Stance.NEUTRAL:
                 return LogrollingStrategy()
-            elif opponent_stance == Stance.GENEROUS:
+            else:                                          #opponent_stance == Stance.GENEROUS:
                 return ContinuedConcessionsStrategy()
 
         elif opponent_negotiation_model == NegotiationType.RANDOM:
             return ContinuedConcessionsStrategy()
 
-        elif opponent_negotiation_model == NegotiationType.UNKNOWN:
+        else:                                              # opponent_negotiation_model == NegotiationType.UNKNOWN:
             if opponent_stance == Stance.GREEDY or opponent_fairness == Fairness.UNFAIR:
                 return RespondToExtremeOfferStrategy()
             elif opponent_stance == Stance.NEUTRAL:
                 return LogrollingStrategy()
-            elif opponent_stance == Stance.GENEROUS:
+            else:                                          # opponent_stance == Stance.GENEROUS:
                 return ContinuedConcessionsStrategy()
-        return LogrollingStrategy()

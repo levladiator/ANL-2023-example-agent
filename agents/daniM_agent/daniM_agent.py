@@ -323,30 +323,3 @@ class DaniMAgent(DefaultParty):
         self.own_bids.append(best_bid)
 
         return best_bid
-
-    def score_bid(self, bid: Bid, alpha, eps) -> float:
-        """Calculate heuristic score for a bid
-
-        Args:
-            bid (Bid): Bid to score
-            alpha (float, optional): Trade-off factor between self-interested and
-                altruistic behaviour.
-            eps (float, optional): Time pressure factor, balances between conceding
-                and Boulware behaviour over time.
-
-        Returns:
-            float: score
-        """
-        progress = self.progress.get(int(time() * 1000))
-
-        our_utility = float(self.profile.getUtility(bid))
-
-        time_pressure = 1.0 - progress ** (1 / eps)
-        score = alpha * time_pressure * our_utility
-
-        if self.opponent_model is not None:
-            opponent_utility = self.opponent_model.get_predicted_utility(bid)
-            opponent_score = (1.0 - alpha * time_pressure) * opponent_utility
-            score += opponent_score
-
-        return score
