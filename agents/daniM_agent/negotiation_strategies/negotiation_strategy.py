@@ -12,6 +12,14 @@ class NegotiationStrategy(ABC):
         """
 
     def score_bid_for_social_welfare(self, bid: Bid, agent) -> float:
+        """
+            Scores bid based on social welfare score, by adapting own utility score
+            and predicted opponent utility score, and adding them together.
+
+            Notes:
+                - agent.eps = importance of passed time based on agent characteristics
+                - agent.alpha = importance of agent.eps
+        """
         progress = agent.progress.get(int(time() * 1000))
 
         our_utility = float(agent.profile.getUtility(bid))

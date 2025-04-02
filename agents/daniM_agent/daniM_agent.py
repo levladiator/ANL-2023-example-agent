@@ -179,15 +179,15 @@ class DaniMAgent(DefaultParty):
         if self.opponent_negotiation_type == NegotiationType.CONCEDER:
             self.alpha = 0.95  # we want to be more selfish if the opponent is a conceder
             self.reservation_value = 0.75
-            self.eps = 0.02
+            self.eps = 0.1
+        elif self.opponent_negotiation_type == NegotiationType.RANDOM:
+            self.alpha = 0.875
+            self.reservation_value = 0.70
+            self.eps = 0.15
         elif self.opponent_negotiation_type == NegotiationType.HARDLINER:
             self.alpha = 0.80  # we have to concede more if the opponent is a hardliner
-            self.reservation_value = 0.6
-            self.eps = 0.08
-        elif self.opponent_negotiation_type == NegotiationType.RANDOM:
-            self.alpha = 0.87
             self.reservation_value = 0.65
-            self.eps = 0.05
+            self.eps = 0.2
 
     def adjust_opponent_fairness(self, bid: Bid):
         our_utility: float = float(self.profile.getUtility(bid))
@@ -236,7 +236,7 @@ class DaniMAgent(DefaultParty):
                 diffs = np.diff(self.opponent_utilities)
                 positive_diffs = np.sum(diffs > 0)
                 negative_diffs = np.sum(diffs < 0)
-                if positive_diffs > int(0.4 * len(self.opponent_utilities)) and negative_diffs > int(0.4 * len(self.opponent_utilities)):
+                if positive_diffs > int(0.45 * len(self.opponent_utilities)) and negative_diffs > int(0.45 * len(self.opponent_utilities)):
                     self.opponent_negotiation_type = NegotiationType.RANDOM
                 else:
                     diff = self.opponent_utilities[-1] - self.opponent_utilities[0]
@@ -305,11 +305,14 @@ class DaniMAgent(DefaultParty):
         best_bid = None
         best_bid_index = 0
 
-        window_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
+        # window_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
+        window_size = 1500
 
         right_boundary: int = min(int(self.last_bid_sent_index + window_size), len(self.all_bids))
 
-        for i in range(self.last_bid_sent_index, right_boundary):
+        move_on: bool = all(e == self.own_bids[-1] for e in self.own_bids[-10:]) if 10 <= len(self.own_bids) else False
+
+        for i in range(self.last_bid_sent_index + move_on, right_boundary):
             bid = self.all_bids[i]
             bid_score = self.negotiation_strategy.score_bid(bid, self)
             own_utility = self.profile.getUtility(bid)
@@ -317,7 +320,7 @@ class DaniMAgent(DefaultParty):
                 best_bid_score, best_bid, best_bid_index = bid_score, bid, i
 
         if best_bid is None:
-            return self.find_bid()
+            return self.own_bids[-1]
 
         self.last_bid_sent_index = best_bid_index
         self.own_bids.append(best_bid)

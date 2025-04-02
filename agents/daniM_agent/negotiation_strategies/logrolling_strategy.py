@@ -21,11 +21,13 @@ class LogrollingStrategy(NegotiationStrategy):
         return self.score_bid_for_social_welfare(bid, agent)
 
     def get_search_objective(self, agent) -> dict[str, str]:
+        # sort issues based on own weights
         own_weights: dict[str, float] = {key: float(value) for key, value in agent.profile.getWeights().items()}
         own_weights = OrderedDict(
             sorted(own_weights.items(), key=lambda item: item[1], reverse=True)
         )
 
+        # sort issues based on predicted opponent weights
         opponent_weights: dict[str, float] = dict()
         for issue, issue_estimator in agent.opponent_model.issue_estimators.items():
             opponent_weights[issue] = issue_estimator.weight
