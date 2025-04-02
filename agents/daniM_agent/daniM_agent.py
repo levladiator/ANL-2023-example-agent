@@ -348,7 +348,7 @@ class DaniMAgent(DefaultParty):
         best_bid_index = 0
 
         # Windows of at least 5 bids
-        window_size = max(self.progress.get(int(time() * 1000)) * 750, 5)
+        window_size = max(self.progress.get(int(time() * 1000)) * 1000, 5)
         # Right boundary bounded on the search space length
         right_boundary: int = min(int(self.last_bid_sent_index + window_size), len(self.all_bids))
         # Do not include last sent bid if we already sent it 10 times
